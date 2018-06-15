@@ -21,6 +21,10 @@ tf_module {
     mtype: "<class \'google.protobuf.pyext.cpp_message.GeneratedProtocolMessageType\'>"
   }
   member {
+    name: "Checkpoint"
+    mtype: "<type \'type\'>"
+  }
+  member {
     name: "CheckpointSaverHook"
     mtype: "<type \'type\'>"
   }
@@ -395,6 +399,10 @@ tf_module {
   member_method {
     name: "range_input_producer"
     argspec: "args=[\'limit\', \'num_epochs\', \'shuffle\', \'seed\', \'capacity\', \'shared_name\', \'name\'], varargs=None, keywords=None, defaults=[\'None\', \'True\', \'None\', \'32\', \'None\', \'None\'], "
+  }
+  member_method {
+    name: "remove_checkpoint"
+    argspec: "args=[\'checkpoint_prefix\', \'checkpoint_format_version\', \'meta_graph_suffix\'], varargs=None, keywords=None, defaults=[\'2\', \'meta\'], "
   }
   member_method {
     name: "replica_device_setter"

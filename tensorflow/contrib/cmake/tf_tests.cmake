@@ -212,6 +212,10 @@ if (tensorflow_BUILD_PYTHON_TESTS)
     "${tensorflow_source_dir}/tensorflow/contrib/factorization/python/ops/gmm_test.py"
     # Disable following manual tag in BUILD.
     "${tensorflow_source_dir}/tensorflow/python/keras/_impl/keras/layers/convolutional_test.py"
+    # These tests depend on a .so file
+    ${tensorflow_source_dir}/tensorflow/python/kernel_tests/duplicate_op_test.py
+    ${tensorflow_source_dir}/tensorflow/python/kernel_tests/invalid_op_test.py
+    ${tensorflow_source_dir}/tensorflow/python/kernel_tests/ackermann_test.py
 
   )
   if (WIN32)
@@ -267,6 +271,8 @@ if (tensorflow_BUILD_PYTHON_TESTS)
       "${tensorflow_source_dir}/tensorflow/python/kernel_tests/variable_scope_test.py"
       "${tensorflow_source_dir}/tensorflow/python/kernel_tests/functional_ops_test.py"
       "${tensorflow_source_dir}/tensorflow/python/kernel_tests/py_func_test.py"
+      # Flaky on Windows cpu with py36 (b/73556968)
+      "${tensorflow_source_dir}/tensorflow/python/kernel_tests/sparse_reshape_op_test.py"
       # Windows file management related issues.
       "${tensorflow_source_dir}/tensorflow/python/training/evaluation_test.py"
       # training tests
@@ -284,6 +290,7 @@ if (tensorflow_BUILD_PYTHON_TESTS)
       "${tensorflow_source_dir}/tensorflow/python/data/kernel_tests/iterator_ops_cluster_test.py"
       "${tensorflow_source_dir}/tensorflow/contrib/data/python/kernel_tests/interleave_dataset_op_test.py"  # Deadlocks
       "${tensorflow_source_dir}/tensorflow/contrib/data/python/kernel_tests/sloppy_transformation_dataset_op_test.py"  # b/65430561
+      "${tensorflow_source_dir}/tensorflow/contrib/data/python/kernel_tests/prefetching_ops_test.py"  # Segfaults on Windows.
       # tensor_forest tests (also note that we exclude the hybrid tests for now)
       "${tensorflow_source_dir}/tensorflow/contrib/tensor_forest/python/kernel_tests/count_extremely_random_stats_op_test.py"  # Results in wrong order.
       "${tensorflow_source_dir}/tensorflow/contrib/tensor_forest/python/kernel_tests/sample_inputs_op_test.py"  # Results in wrong order.

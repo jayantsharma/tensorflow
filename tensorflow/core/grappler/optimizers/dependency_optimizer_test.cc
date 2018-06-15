@@ -16,11 +16,13 @@ limitations under the License.
 #include "tensorflow/core/grappler/optimizers/dependency_optimizer.h"
 #include "tensorflow/cc/ops/standard_ops.h"
 #include "tensorflow/core/framework/node_def.pb.h"
+#include "tensorflow/core/framework/tensor_testutil.h"
 #include "tensorflow/core/grappler/grappler_item.h"
 #include "tensorflow/core/grappler/inputs/trivial_test_graph_input_yielder.h"
 #include "tensorflow/core/grappler/optimizers/constant_folding.h"
 #include "tensorflow/core/grappler/optimizers/model_pruner.h"
 #include "tensorflow/core/grappler/utils.h"
+#include "tensorflow/core/grappler/utils/grappler_test.h"
 #include "tensorflow/core/grappler/utils/topological_sort.h"
 #include "tensorflow/core/lib/core/status_test_util.h"
 #include "tensorflow/core/platform/test.h"
@@ -29,7 +31,7 @@ namespace tensorflow {
 namespace grappler {
 namespace {
 
-class DependencyOptimizerTest : public ::testing::Test {};
+class DependencyOptimizerTest : public GrapplerTest {};
 
 void VerifyGraphsEqual(const GraphDef& original_graph,
                        const GraphDef& optimized_graph, const string& func) {
@@ -268,6 +270,38 @@ TEST_F(DependencyOptimizerTest, RemoveNoOps_DeviceBoundaries) {
       s.WithControlDependencies({noop.operation, noop_1.operation})
           .WithDevice("/CPU:1"),
       y);
+
+  GrapplerItem item;
+  TF_CHECK_OK(s.ToGraphDef(&item.graph));
+  item.fetch.push_back("Identity");
+  item.fetch.push_back("Identity_1");
+
+  DependencyOptimizer optimizer;
+  GraphDef output;
+  Status status = optimizer.Optimize(nullptr, item, &output);
+  TF_EXPECT_OK(status);
+
+  // The optimization should be disabled to prevent increasing the number of
+  // nodes crossing device boundaries.
+  TF_CHECK_OK(TopologicalSort(&item.graph));
+  VerifyGraphsEqual(item.graph, output, __FUNCTION__);
+}
+
+TEST_F(DependencyOptimizerTest, RemoveIdentityOps_DeviceBoundaries) {
+  tensorflow::Scope s = tensorflow::Scope::NewRootScope();
+  Output x = ops::RandomUniform(s.WithOpName("x").WithDevice("/CPU:0"), {1, 2},
+                                DT_FLOAT);
+  Output y = ops::RandomUniform(s.WithOpName("y").WithDevice("/CPU:0"), {1, 2},
+                                DT_FLOAT);
+  // Identity with a single input- and two output dependencies.
+  auto id_a = ops::Identity(s.WithOpName("id_a").WithDevice("/CPU:1"), x);
+  // Identity with a two input- and a single output dependency.
+  auto id_b = ops::Identity(
+      s.WithOpName("id_b").WithControlDependencies(y).WithDevice("/CPU:0"), x);
+
+  Output id =
+      ops::Identity(s.WithControlDependencies(id_a).WithDevice("/CPU:1"), id_b);
+  Output id_1 = ops::Identity(s.WithDevice("/CPU:1"), id_a);
 
   GrapplerItem item;
   TF_CHECK_OK(s.ToGraphDef(&item.graph));
@@ -644,6 +678,112 @@ TEST_F(DependencyOptimizerTest, Identity_DeviceCrossing_ConsumerOnSameDevice) {
       EXPECT_EQ("x_on_1", node.input(0));
     }
   }
+}
+
+TEST_F(DependencyOptimizerTest, RemoveGreaterEqualWithNoOp) {
+  tensorflow::Scope s = tensorflow::Scope::NewRootScope();
+  Output x = ops::Placeholder(s.WithOpName("x"), DT_FLOAT,
+                              ops::Placeholder::Shape({}));
+  Output y = ops::Placeholder(s.WithOpName("y"), DT_FLOAT,
+                              ops::Placeholder::Shape({}));
+  auto greaterequal = ops::GreaterEqual(s.WithOpName("GreaterEqual"), x, y);
+  auto noop =
+      ops::NoOp(s.WithOpName("NoOp").WithControlDependencies(greaterequal));
+  Output add = ops::Add(
+      s.WithOpName("z").WithControlDependencies({noop.operation}), x, y);
+  GrapplerItem item;
+  TF_CHECK_OK(s.ToGraphDef(&item.graph));
+
+  DependencyOptimizer optimizer;
+  GraphDef output;
+  item.fetch.push_back("z");
+  TF_EXPECT_OK(optimizer.Optimize(nullptr, item, &output));
+
+  int count = 0;
+  for (const NodeDef& node : output.node()) {
+    if (node.name() == "x") {
+      count++;
+      EXPECT_EQ("Placeholder", node.op());
+      EXPECT_EQ(0, node.input_size());
+    } else if (node.name() == "y") {
+      count++;
+      EXPECT_EQ("Placeholder", node.op());
+      EXPECT_EQ(0, node.input_size());
+    } else if (node.name() == "GreaterEqual") {
+      count++;
+    } else if (node.name() == "NoOp") {
+      count++;
+    } else if (node.name() == "z") {
+      count++;
+      EXPECT_EQ("Add", node.op());
+      EXPECT_EQ(2, node.input_size());
+      EXPECT_EQ("x", node.input(0));
+      EXPECT_EQ("y", node.input(1));
+    }
+  }
+  EXPECT_EQ(3, count);
+}
+
+TEST_F(DependencyOptimizerTest, GroupCrossDeviceControlDeps) {
+  GrapplerItem item;
+  {
+    tensorflow::Scope s = tensorflow::Scope::NewRootScope();
+    Output a = ops::RandomUniform(s.WithOpName("a").WithDevice("/CPU:1"),
+                                  {1, 2}, DT_FLOAT);
+    Output b = ops::RandomUniform(s.WithOpName("b").WithDevice("/CPU:2"),
+                                  {1, 2}, DT_FLOAT);
+    Output c = ops::RandomUniform(s.WithOpName("c").WithDevice("/CPU:1"),
+                                  {1, 2}, DT_FLOAT);
+    Output d = ops::RandomUniform(s.WithOpName("d").WithDevice("/CPU:3"),
+                                  {1, 2}, DT_FLOAT);
+    Output e = ops::RandomUniform(s.WithOpName("e").WithDevice("/CPU:0"),
+                                  {1, 2}, DT_FLOAT);
+    // Node with cross-device dependencies.
+    auto fetch = ops::Identity(
+        s.WithOpName("f")
+            .WithControlDependencies({a.op(), b.op(), c.op(), d.op()})
+            .WithDevice("/GPU:0"),
+        {e});
+
+    TF_CHECK_OK(s.ToGraphDef(&item.graph));
+    item.fetch.push_back("f");
+  }
+
+  GraphDef expected;
+  {
+    tensorflow::Scope s = tensorflow::Scope::NewRootScope();
+    Output a = ops::RandomUniform(s.WithOpName("a").WithDevice("/CPU:1"),
+                                  {1, 2}, DT_FLOAT);
+    Output b = ops::RandomUniform(s.WithOpName("b").WithDevice("/CPU:2"),
+                                  {1, 2}, DT_FLOAT);
+    Output c = ops::RandomUniform(s.WithOpName("c").WithDevice("/CPU:1"),
+                                  {1, 2}, DT_FLOAT);
+    Output d = ops::RandomUniform(s.WithOpName("d").WithDevice("/CPU:3"),
+                                  {1, 2}, DT_FLOAT);
+    Output e = ops::RandomUniform(s.WithOpName("e").WithDevice("/CPU:0"),
+                                  {1, 2}, DT_FLOAT);
+    auto noop = ops::NoOp(s.WithOpName("GroupCrossDeviceControlEdges_0/f")
+                              .WithDevice("/CPU:1")
+                              .WithControlDependencies({a.op(), c.op()}));
+    auto fetch =
+        ops::Identity(s.WithOpName("f")
+                          .WithControlDependencies({b.op(), d.op(), noop})
+                          .WithDevice("/GPU:0"),
+                      {e});
+
+    TF_CHECK_OK(s.ToGraphDef(&expected));
+  }
+
+  DependencyOptimizer optimizer;
+  GraphDef output;
+  TF_EXPECT_OK(optimizer.Optimize(nullptr, item, &output));
+  CompareGraphs(expected, output);
+
+  // Run the optimizer again to verify idempotence.
+  item.graph.Swap(&output);
+  output.Clear();
+  TF_EXPECT_OK(optimizer.Optimize(nullptr, item, &output));
+  CompareGraphs(expected, output);
 }
 
 }  // namespace

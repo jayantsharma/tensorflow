@@ -31,13 +31,13 @@ from tensorflow.python.framework import ops
 from tensorflow.python.ops import control_flow_ops
 from tensorflow.python.ops import nn
 from tensorflow.python.ops import partitioned_variables
-from tensorflow.python.ops import state_ops
 from tensorflow.python.ops import variable_scope
 from tensorflow.python.ops.losses import losses
 from tensorflow.python.summary import summary
+from tensorflow.python.training import distribute as distribute_lib
 from tensorflow.python.training import sync_replicas_optimizer
 from tensorflow.python.training import training_util
-from tensorflow.python.util.tf_export import tf_export
+from tensorflow.python.util.tf_export import estimator_export
 
 # The default learning rates are a historical artifact of the initial
 # implementation.
@@ -215,8 +215,7 @@ def _dnn_linear_combined_model_fn(features,
 
     train_op = control_flow_ops.group(*train_ops)
     with ops.control_dependencies([train_op]):
-      with ops.colocate_with(global_step):
-        return state_ops.assign_add(global_step, 1)
+      return distribute_lib.increment_var(global_step)
 
   return head.create_estimator_spec(
       features=features,
@@ -226,7 +225,7 @@ def _dnn_linear_combined_model_fn(features,
       logits=logits)
 
 
-@tf_export('estimator.DNNLinearCombinedClassifier')
+@estimator_export('estimator.DNNLinearCombinedClassifier')
 class DNNLinearCombinedClassifier(estimator.Estimator):
   """An estimator for TensorFlow Linear and DNN joined classification models.
 
@@ -407,7 +406,7 @@ class DNNLinearCombinedClassifier(estimator.Estimator):
         warm_start_from=warm_start_from)
 
 
-@tf_export('estimator.DNNLinearCombinedRegressor')
+@estimator_export('estimator.DNNLinearCombinedRegressor')
 class DNNLinearCombinedRegressor(estimator.Estimator):
   """An estimator for TensorFlow Linear and DNN joined models for regression.
 
@@ -554,8 +553,7 @@ class DNNLinearCombinedRegressor(estimator.Estimator):
           features=features,
           labels=labels,
           mode=mode,
-          head=head_lib.  # pylint: disable=protected-access
-          _regression_head_with_mean_squared_error_loss(
+          head=head_lib._regression_head(  # pylint: disable=protected-access
               label_dimension=label_dimension, weight_column=weight_column,
               loss_reduction=loss_reduction),
           linear_feature_columns=linear_feature_columns,

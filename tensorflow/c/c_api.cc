@@ -631,7 +631,22 @@ Status MessageToBuffer(const tensorflow::protobuf::Message& in,
         "Failed to allocate memory to serialize message of type '",
         in.GetTypeName(), "' and size ", proto_size);
   }
-  in.SerializeToArray(buf, proto_size);
+  // SerializeToArray takes size as an int.
+  // This next 'if' is a workaround till we update to depend on a version
+  // of protocol buffers that includes
+  // https://github.com/google/protobuf/pull/4739
+  if (proto_size > std::numeric_limits<int>::max()) {
+    return InvalidArgument("Cannot serialize protocol buffer of type ",
+                           in.GetTypeName(), " as the serialized size (",
+                           proto_size,
+                           "bytes) would be larger than the limit (",
+                           std::numeric_limits<int>::max(), " bytes)");
+  }
+  if (!in.SerializeToArray(buf, proto_size)) {
+    return InvalidArgument("Unable to serialize ", in.GetTypeName(),
+                           " protocol buffer, perhaps the serialized size (",
+                           proto_size, " bytes) is too large?");
+  }
   out->data = buf;
   out->length = proto_size;
   out->data_deallocator = [](void* data, size_t length) {
@@ -2097,7 +2112,7 @@ static void GraphImportGraphDefLocked(TF_Graph* graph, const GraphDef& def,
 
   for (int i = 0; i < size; ++i) {
     TensorId id = results.missing_unused_input_map_keys[i];
-    tf_results->missing_unused_key_names_data.push_back(id.first.ToString());
+    tf_results->missing_unused_key_names_data.push_back(std::string(id.first));
     tf_results->missing_unused_key_names[i] =
         tf_results->missing_unused_key_names_data.back().c_str();
     tf_results->missing_unused_key_indexes[i] = id.second;

@@ -103,8 +103,8 @@ ScopedAllocatorContainer::~ScopedAllocatorContainer() {
   // In normal execution the table should be empty and all of its
   // contents deleted via Drop.  When when a step ends early
   // (e.g. through abnormal termination) we need to clean up
-  // explicitly.  So long as graph exection of the associated step has
-  // completey terminated this should be safe.
+  // explicitly.  So long as graph execution of the associated step has
+  // completely terminated this should be safe.
   for (auto& it : allocators_) {
     if (it.second.field_index == ScopedAllocator::kBackingIndex) {
       delete it.second.scoped_allocator;
@@ -160,13 +160,18 @@ Status ScopedAllocatorMgr::AddScopedAllocator(
                                  expected_call_count);
 }
 
-void ScopedAllocatorMgr::PopulateFields(
+/*static*/
+size_t ScopedAllocatorMgr::PopulateFields(
     int32 scope_id, const gtl::ArraySlice<TensorShape>& shapes,
     const DataType dtype, std::vector<ScopedAllocator::Field>* fields) {
   const int32 num_fields = static_cast<int32>(shapes.size());
   fields->resize(num_fields);
   size_t offset = 0;
   for (int32 i = 0; i < num_fields; ++i) {
+    size_t overshoot = offset % Allocator::kAllocatorAlignment;
+    if (overshoot > 0) {
+      offset += (Allocator::kAllocatorAlignment - overshoot);
+    }
     size_t bytes = shapes[i].num_elements() * DataTypeSize(dtype);
     (*fields)[i].scope_id = scope_id + 1 + i;
     (*fields)[i].bytes = bytes;
@@ -175,11 +180,8 @@ void ScopedAllocatorMgr::PopulateFields(
             << " bytes=" << (*fields)[i].bytes
             << " offset=" << (*fields)[i].offset;
     offset += bytes;
-    size_t overshoot = offset % Allocator::kAllocatorAlignment;
-    if (overshoot > 0) {
-      offset += (Allocator::kAllocatorAlignment - overshoot);
-    }
   }
+  return offset;
 }
 
 }  // namespace tensorflow

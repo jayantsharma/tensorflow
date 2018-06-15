@@ -149,6 +149,7 @@ py_test(
         "//tensorflow/python:saver_test_utils",
         "//tensorflow/python:state_ops",
         "//tensorflow/python:test_ops",
+        "//tensorflow/python:training",
         "//tensorflow/python:util",
         "//tensorflow/python:variables",
     ],
@@ -235,15 +236,3 @@ py_test(
 
 # -----------------------------------------------------------------------------
 # Google-internal targets.  These must be at the end for syncrepo.
-
-filegroup(
-    name = "all_files",
-    srcs = glob(
-        ["**/*"],
-        exclude = [
-            "**/METADATA",
-            "**/OWNERS",
-        ],
-    ),
-    visibility = ["//tensorflow:__subpackages__"],
-)
